@@ -1,0 +1,334 @@
+---
+title: "Sales Analysis of Minute Maid Orange Juice"
+subtitle: "MKTG 6620 -Machine Learning For Business Applications"
+author: "Huzefa Saifee-u1274086"
+date: "12/03/2019"
+output: word_document
+---
+
+Problem Definition:
+
+Basically, both the Brand Manager and the Sales Manager, are interested in increasing the sales of Minute Maid Orange Juice. 
+However, the Brand Manager wants to know which variables are influencing the customer’s probability of buying Minute Maid while the Sales manager wants to know the probability of a customer purchasing Minute Maid.
+For our model analysis, we will focus on two areas. Firstly, we will determine which variables influence the purchase of Minute Maid Orange Juice and how much they impact Minute Maid’s purchase. Then we will focus on building a model that predicts whether a customer will purchase the Minute Maid Orange Juice or not. Also, we will consider the accuracy of our model to achieve optimum results.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Objectives:
+
+1.	Increase Minute Maid Orange Juice’s Sales
+2.	Determine influential variables responsible for Minute Maid’s Sale
+3.	Identify best suitable model to predict Minute Maid’s sales
+4.	Provide answers to the queries of Brand & Sales Manager
+5.	Generate recommendations & provide support
+
+```{r echo = T}
+# PACKAGES UTILIZED
+library("dataPreparation")
+library("mlbench")
+library("e1071")
+library("caret")
+library("ROCR")
+library("kernlab")
+library("dplyr")
+library("corrplot")
+library("plotROC")
+library("ggplot2")
+```
+
+Methods Used:
+
+1.	Exploratory Data Analysis
+2.	Data Preparation for modeling 
+3.	Split data in Train and Test Data
+4.	Determining important variables based on P-Value
+5.	Apply Logistic & SVM Models
+
+```{r echo = T}
+# IMPORTING DATA
+OJ<-read.csv(url("OJ.csv"))
+```
+
+Exploratory Data Analysis:
+
+1.	Check for Outliers
+2.	Check for NULL / NA Values
+3.	Check for Mis-Classified variables
+
+Why Exploratory Data Analysis?
+
+Why Exploratory Data Analysis?
+It is common that in real-world data, there might be some errors because of which outliers are generated. Sometimes, because of noise, the data gets corrupted and we get NA values. Also, there are cases when the data has inconsistency in variable names because of which they are misinterpreted or “misclassified.” So performing exploratory data analysis, in other words preparing the data is important.
+
+```{r echo = T}
+# CHECK VARIABLES TYPE
+lapply(OJ, class)
+
+## DATA CLEANING ##
+# RecodING MM/CH as Y/N IN PURCHASE VARIABLE
+# ALSO, FACTORIZING CATEGORICAL VARIABLES
+OJ <- OJ %>%
+  mutate( Purchase = recode_factor(Purchase, "MM" = "Y", "CH" = "N"),
+          StoreID = factor(StoreID),
+          SpecialCH = factor(SpecialCH),
+          SpecialMM = factor(SpecialMM),
+          Purchase = factor(Purchase))
+
+# CHECK VARIABLES TYPE
+lapply(OJ, class)
+```
+
+Data Preparation:
+
+Remove All:
+1.	Constant Variables
+2.	Double Variables
+3.	Bijection Variables
+  a.	STORE of StoreID
+4.	Included Variables
+  a.	Store7 in StoreID
+  b.	DiscCH in PctDiscCH
+  c.	DiscMM in PctDiscMM
+
+```{r echo = T}
+# IDENTIFY AND LIST VARIABLES THAT ARE CONSTANTS
+constant_cols <- whichAreConstant(OJ)
+
+# IDENTIFY AND LIST VARIABLES THAT ARE DOUBLES
+double_cols <- whichAreInDouble(OJ)
+
+# IDENTIFY AND LIST VARIABLES THAT ARE EXACT BIJECTIONS
+bijections_cols <- whichAreBijection(OJ)
+# REMOVE ALL BIJECTIONS 
+OJ <- OJ[,-18]
+
+# IDENTIFY AND LIST VARIABLES THAT ARE INCLUDED IN OTHER VARIABLES
+included_cols <- whichAreIncluded(OJ)
+
+# REMOVE ALL INCLUDED VARIABLES
+OJ <- OJ[,-14]
+OJ <- OJ[,-7]
+OJ <- OJ[,-6]
+```
+
+Apply Correlation on the Data, and remove following highly correlated variables:
+1.	PriceDiff
+2.	SalePriceMM
+3.	SalePriceCH
+4.	ListPriceDiff
+
+```{r echo = T}
+# CHECK CORRELATION AMONGST NUMERIC VARIABLES
+OJ_numeric <- OJ[, c(4,5,8,9,10,11,12,13,14)]
+res <- cor(OJ_numeric)
+round(res, 2)
+```
+
+Corrplot() on the Data shows highly correlated variables:
+
+```{r echo = T}
+corrplot(res, method="number")
+
+# REMOVE ALL CORRELATED VARIABLES
+OJ <- OJ[,-14]
+OJ <- OJ[,-11]
+OJ <- OJ[,-10]
+OJ <- OJ[,-9]
+
+# REMOVE MIS-CLASSIFIED VARIABLES
+OJ <- OJ[,-2]
+#######################
+```
+
+Split in Train & Test Data:
+
+In order to reduce overfitting in the data, we randomly split a specific percentage of data into train data and then using the test data for cross-validation 
+
+```{r echo = T}
+## TRAIN & TEST DATA ##
+# SPECIFY PROPORTION OF DATA TO TEST (I SET AT 80% TRAIN) AND SEED FOR REPLICATION
+split = .8
+set.seed(99894) 
+
+## DATA IS SPLIT INTO TRAIN / TEST(HOLDOUT) ##
+train_index <- sample(1:nrow(OJ), split * nrow(OJ)) ## 80% of data randomly selected for train
+test_index <- setdiff(1:nrow(OJ), train_index) ## the remaining 20% of the data is used for holdout testing
+
+X_train_unscaled <- OJ[train_index,-1]
+y_train <- OJ[train_index, 1]
+
+X_test_unscaled <- OJ[test_index, -1]
+y_test <- OJ[test_index, 1]
+
+# DATA IS STANDARDIZED AND ENCODED
+# Standardizing continuous variables..
+scales <- build_scales(dataSet = X_train_unscaled, cols = "auto", verbose = FALSE) 
+
+X_train <- fastScale(dataSet = X_train_unscaled, scales = scales, verbose = FALSE)
+X_test <- fastScale(dataSet = X_test_unscaled, scales = scales, verbose = FALSE)
+
+# EncodING categorical variables..
+encoding <- build_encoding(dataSet = X_train, cols = "auto", verbose = FALSE) 
+X_train <- one_hot_encoder(dataSet = X_train, encoding = encoding, drop = TRUE, verbose = FALSE)
+X_test <- one_hot_encoder(dataSet = X_test, encoding = encoding, drop = TRUE, verbose = FALSE)
+
+# Create one data frame using both Outcome and Predictor Variables
+train_Data <- cbind(y_train,X_train)
+test_Data <- cbind(y_test,X_test)
+#######################
+```
+Influential Variables:
+
+```{r echo = T}
+## DETERMINING INFLUENTIAL PREDICTOR VARIABLES ##
+scale <- build_scales(dataSet = OJ, verbose = TRUE)
+OJ_2 <- fastScale(dataSet = OJ, scales = scale, verbose = TRUE)
+predictionModel <- glm(Purchase ~ ., data = OJ_2,family = binomial(link = 'logit'))
+summary(predictionModel)$coefficients
+```
+
+Determining Influential variables using P-Value helps us understand that variables such as SpecialCH, SpecialMM are not influencing the purchase of MM
+
+Using AIC value to corroborate our intuition of selecting only a few variables:
+
+```{r echo = T}
+# AIC MODEL ON INFLUENTIAL VARIABLES
+Model1 <- glm(Purchase ~ ., data = OJ_2, family = binomial(link = "logit"))
+Model2 <- glm(Purchase ~ StoreID + PriceCH + PriceMM + LoyalCH + PctDiscMM + PctDiscCH, data = OJ_2, family = binomial(link = "logit")) 
+print(paste("Model 1:", AIC(Model1), "Model 2:", AIC(Model2)))
+#######################
+```
+
+If we use all the variables, as we did in Model1, the AIC value will be more and if consider only influential variables, as we did in Model2, AIC value will be less, which implies our Model2 is performing better
+
+Logistic Model:
+
+Applying Logistic Model on train data with the selected influential variables
+After applying glm(), we use the predict to get the result in the form of probability
+Then Converting Probabilities  to "Y" and "N" format and factorizing the variable to match it with the reference variable's (Purchase) data format
+
+```{r echo = T}
+#################
+## LOGIT MODEL ##
+#################
+predictionModel <- glm(Purchase ~ PriceCH + PriceMM + LoyalCH + PctDiscMM + PctDiscCH + StoreID.1 + StoreID.2 + StoreID.3 + StoreID.4, data = train_Data, family = binomial(link = 'logit'))
+
+# Predict
+X_test$prediction <- predict(predictionModel, newdata = X_test, type ="response")
+
+# Converting Probilities into Categorical Predictions
+X_test$binary_prediction<-ifelse(X_test$prediction < 0.55,"Y","N")
+X_test$binary_prediction<-as.factor(X_test$binary_prediction)
+
+# CONFUSION MATRIX
+confusionMatrix(data = X_test$binary_prediction, as.factor(y_test$Purchase))
+##################################
+```
+
+The Above Confusion Matrix displays the accuracy and the confidence interval of the Logit Model which are required for the comparison with other models and to answer the questions asked by the Brand Manager and Sales Manager
+
+Linear SVM Model:
+
+Applying Linear SVM Model to the train data with different values of C to get the optimum Accuracy
+Predicting the model with the optimum C value and generating the Confusion Matrix with the predicted values and the test data (Purchase)
+
+```{r echo = T}
+######################
+## LINEAR SVM MODEL ##
+######################
+cctrl <- trainControl(method = "cv", number = 3, returnResamp = "all", classProbs = TRUE)
+
+grid2 <- data.frame(C = c(0.1,1,20,50,100))
+
+# FIND OPTIMAL TUNING PARAMETER (C)
+svmFit2 <- train(Purchase ~ ., data = train_Data, method='svmLinear', trControl = cctrl, tuneGrid = grid2, preProc = c("center", "scale"))
+
+# Predict
+svmPred2 <- predict(svmFit2, newdata = X_test, probability = TRUE)
+
+# CONFUSION MATRIX
+confusionMatrix(data = svmPred2, as.factor(y_test$Purchase))
+############################################
+```
+
+The Above Confusion Matrix displays the accuracy and the confidence interval of the Linear SVM Model which are required for the comparison with other models and to answer the questions asked by the Brand Manager and Sales Manager
+
+Radial SVM Model:
+
+Applying Radial SVM Model to the train data with different values of C and Sigma to get the optimum Accuracy
+Predicting the model with the optimum C & Sigma value pair and generating the Confusion Matrix with the predicted values and the test data (Purchase)
+
+```{r echo = T}
+######################
+## RADIAL SVM MODEL ##
+######################
+fitControl <- trainControl(## 4-fold CV
+  method = "repeatedcv",
+  number = 4,
+  ## repeated two times
+  repeats = 2,
+  summaryFunction=twoClassSummary,
+  classProbs = TRUE)
+
+grid <- expand.grid(sigma = c(.01, .02),
+                    C = c(.69, .75, 0.70, 0.72, 1))
+
+# FIND OPTIMAL TUNING PARAMETERS (C and SIGMA) 
+svmFit1 <- train(Purchase ~ ., data = train_Data, 
+                 method='svmRadial',  
+                 trControl = fitControl,
+                 metric = "ROC",
+                 verbose = FALSE,
+                 probability = TRUE,
+                 tuneGrid = grid
+)
+
+# Predict
+svmPred <- predict(svmFit1, newdata = X_test, probability = TRUE)
+
+# CONFUSION MATRIX
+confusionMatrix(data = svmPred, as.factor(y_test$Purchase))
+############################################
+```
+
+The Above Confusion Matrix displays the accuracy and the confidence interval of the Radial SVM Model which are required for the comparison with other models and to answer the questions asked by the Brand Manager and Sales Manager
+
+Brand Manager's Questions:
+
+1. What predictor variables influence the purchase of MM?
+    The Predictor variables influencing the purchase of MM are:
+      a. PriceCH
+      b. PriceMM
+      c. LoyalCH
+      d. PctDiscMM
+      e. PctDiscCH
+      f. StoreID
+2. Are all the variables in the dataset effective, or are some more effective than others?
+    Not all variables have the same influence on the Purchase variable. The more significant variables are:
+      a. LoyalCH
+      b. PctDiscMM
+      c. PctDiscCH
+      d. PriceMM
+3. How confident are you in your recommendations?
+    While determining the influential predictor variables, we saw that all the four variables are having very low P-Value inferring that all four variables are Statistically Significant and are effective variables.
+
+Sales Manager's Questions:
+
+1. Can you provide a predictive model that can tell the probability of customers buying MM?
+    Logistic Regression will be the best suitable model to predict whether a customer will be buying MM or CH.
+2. How good is the model in its predictions?
+    The model is 85.98% Accurate.
+3. How confident are you in your recommendations?
+    The model has a Confidence Interval of 95%.
+    Also, it is visible in the Confusion Matrix of Logit Model as:
+      95% CI : (0.806, 0.9034)
+      
+Recommendations:
+
+  1.	Give Discounts on MM to attract more customers, as Discounts do play important role
+  2.	Just like the Loyalty towards CH is there, Promoting Customer’s Loyalty towards MM might help in increase in Sales
+  3.	Different stores have different locations, which indirectly play a huge role in product sales; keeping that in mind for creating marketing strategy will help in the promotion of an MM at different StoreIDs, individually, as well as it will help in planning a better budget distribution.
+
