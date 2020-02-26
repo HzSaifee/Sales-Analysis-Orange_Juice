@@ -49,7 +49,7 @@ Methods Used:
 
 ```{r echo = T}
 # IMPORTING DATA
-OJ<-read.csv(url("OJ.csv"))
+OJ<-read.csv(url("OJ_Dataset.csv"))
 ```
 
 Exploratory Data Analysis:
